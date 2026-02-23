@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Mail, Download, Printer, CheckCircle, XCircle, AlertTriangle, PlayCircle, ExternalLink, Upload, Search } from 'lucide-react';
-import { mockOurTimesheet, mockClientTimesheet } from '../lib/mockData';
 import type { ExtractedData } from '../lib/mockData';
+import { processImageToOCR } from '../lib/ocrService';
+import { exportComparisonToExcel, mailComparisonReport } from '../lib/exportExcel';
 
 export default function ClientTracker() {
   const [step, setStep] = useState<number>(0);
@@ -25,22 +26,30 @@ export default function ClientTracker() {
   };
 
   const startAnalysis = async () => {
+    if (!ourImage || !clientImage) return;
     setStep(1);
     
-    // Simulate OCR Processing for both images
-    await new Promise(r => setTimeout(r, 3000));
+    // Process both images through OCR in parallel
+    const [ourExtracted, clientExtracted] = await Promise.all([
+      processImageToOCR(ourImage, 'our'),
+      processImageToOCR(clientImage, 'client')
+    ]);
     
-    setOurData({ ...mockOurTimesheet, screenshot: ourImage as string });
-    setClientData({ ...mockClientTimesheet, screenshot: clientImage as string });
+    setOurData(ourExtracted);
+    setClientData(clientExtracted);
     
     setStep(2);
   };
+  
+  const isMatched = ourData?.totalHours === clientData?.totalHours;
 
   const handlePrint = () => window.print();
-  const handleExport = () => alert('Mock: Exporting comparison to PDF/Excel...');
-  const handleEmail = () => alert('Mock: Opening email client with comparison report attached...');
-
-  const isMatched = ourData?.totalHours === clientData?.totalHours;
+  const handleExport = () => {
+    if (ourData && clientData) exportComparisonToExcel(ourData, clientData, 'Vaisesika_Client_Comparison');
+  };
+  const handleEmail = () => {
+    if (ourData && clientData) mailComparisonReport(ourData, clientData, 'Vaisesika_Client_Comparison');
+  };
 
   const renderDataSection = (title: string, data: ExtractedData | null) => {
     if (!data) return null;
@@ -106,10 +115,10 @@ export default function ClientTracker() {
         {step === 2 && (
           <div className="flex gap-4">
             <button className="btn btn-secondary" onClick={handleEmail}>
-              <Mail size={16} /> Email Report
+              <Mail size={16} /> Email Excel Report
             </button>
             <button className="btn btn-secondary" onClick={handleExport}>
-              <Download size={16} /> Export CSV
+              <Download size={16} /> Export Excel
             </button>
             <button className="btn btn-primary" onClick={handlePrint}>
               <Printer size={16} /> Print
@@ -171,7 +180,7 @@ export default function ClientTracker() {
              >
                {!ourImage || !clientImage 
                  ? "Upload both screenshots to continue" 
-                 : "Run Validation & Comparison"}
+                 : "Generate Report"}
              </button>
           </div>
         </div>

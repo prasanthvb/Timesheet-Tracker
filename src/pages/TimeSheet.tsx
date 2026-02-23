@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Mail, Download, Printer, CheckCircle, Upload, ExternalLink, Search } from 'lucide-react';
-import { mockOurTimesheet, mockClientTimesheet } from '../lib/mockData';
 import type { ExtractedData } from '../lib/mockData';
+import { processImageToOCR } from '../lib/ocrService';
+import { exportToExcel, mailExcelReport } from '../lib/exportExcel';
 
 export default function TimeSheet() {
   const { type } = useParams<{ type: string }>();
@@ -17,18 +18,17 @@ export default function TimeSheet() {
     ? import.meta.env.VITE_VAISESIKA_TIMESHEET_URL 
     : import.meta.env.VITE_CLIENT_TIMESHEET_URL;
 
-  const startOCR = useCallback(async (imgSrc: string) => {
+  const startOCR = async () => {
+    if (!uploadedImage) return;
     setStep(1); // Set to processing
     
-    // Simulate OCR reading and parsing JSON
-    await new Promise(r => setTimeout(r, 2500)); 
+    // OCR processing using raw text conversion
+    const portalType = isVaisesika ? 'our' : 'client';
+    const extractedInfo = await processImageToOCR(uploadedImage, portalType); 
     
-    const mockedDataRaw = isVaisesika ? mockOurTimesheet : mockClientTimesheet;
-    const mocked = { ...mockedDataRaw, screenshot: imgSrc }; 
-    
-    setData(mocked);
+    setData(extractedInfo);
     setStep(2); // Set to Dashboard
-  }, [isVaisesika]);
+  };
 
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
@@ -45,7 +45,6 @@ export default function TimeSheet() {
               if (event.target?.result) {
                 const src = event.target.result as string;
                 setUploadedImage(src);
-                startOCR(src);
               }
             };
             reader.readAsDataURL(blob);
@@ -56,7 +55,7 @@ export default function TimeSheet() {
     
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [step, startOCR]);
+  }, [step]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -66,7 +65,6 @@ export default function TimeSheet() {
         if (event.target?.result) {
           const src = event.target.result as string;
           setUploadedImage(src);
-          startOCR(src);
         }
       };
       reader.readAsDataURL(file);
@@ -74,8 +72,14 @@ export default function TimeSheet() {
   };
 
   const handlePrint = () => window.print();
-  const handleExport = () => alert('Mock: Exporting to PDF/Excel...');
-  const handleEmail = () => alert('Mock: Opening email client with report attached...');
+  
+  const handleExport = () => {
+    if (data) exportToExcel(data, `${title.replace(' ', '_')}_Export`);
+  };
+  
+  const handleEmail = () => {
+    if (data) mailExcelReport(data, `${title.replace(' ', '_')}_Export`);
+  };
 
   return (
     <div className="w-full mt-4 pb-12 animate-fade-in">
@@ -88,10 +92,10 @@ export default function TimeSheet() {
         {step === 2 && (
           <div className="flex gap-4">
             <button className="btn btn-secondary" onClick={handleEmail}>
-              <Mail size={16} /> Email Report
+              <Mail size={16} /> Email Excel Report
             </button>
             <button className="btn btn-secondary" onClick={handleExport}>
-              <Download size={16} /> Export CSV
+              <Download size={16} /> Export Excel
             </button>
             <button className="btn btn-primary" onClick={handlePrint}>
               <Printer size={16} /> Print
@@ -110,16 +114,28 @@ export default function TimeSheet() {
             </a>
           </div>
 
-          <div className="card glass-panel w-full p-8">
+          <div className="card glass-panel w-full p-8 flex flex-col items-center">
             <h3>Step 2: Provide Screenshot</h3>
             <p className="text-muted mt-2 mb-6">Paste your screenshot from the clipboard or click below to upload.</p>
             
-            <label className="border-2 border-dashed border-[var(--primary)] rounded-lg p-12 flex flex-col items-center justify-center bg-[rgba(79,70,229,0.05)] cursor-pointer transition-colors hover:bg-[rgba(79,70,229,0.1)] w-full">
-              <Upload size={48} className="text-[var(--primary)] mb-4" />
-              <span className="text-lg font-medium">Click to upload image</span>
-              <span className="text-sm text-muted mt-2">or press Ctrl+V / Cmd+V to paste</span>
-              <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
-            </label>
+            {uploadedImage ? (
+              <div className="w-full flex flex-col items-center">
+                <div className="relative w-full border border-[var(--border)] rounded-md min-h-[200px] max-h-[400px] overflow-hidden mb-6 flex items-center justify-center bg-[var(--background)]">
+                  <img src={uploadedImage} alt="Uploaded Timesheet" className="max-w-full max-h-[400px] object-contain" />
+                  <button className="btn btn-secondary absolute bottom-4 right-4 shadow-lg text-xs py-1" onClick={() => setUploadedImage(null)}>Replace</button>
+                </div>
+                <button className="btn btn-primary text-lg py-3 px-8 group w-full sm:w-auto" onClick={startOCR}>
+                  Generate Report
+                </button>
+              </div>
+            ) : (
+              <label className="border-2 border-dashed border-[var(--primary)] rounded-lg p-12 flex flex-col items-center justify-center bg-[rgba(79,70,229,0.05)] cursor-pointer transition-colors hover:bg-[rgba(79,70,229,0.1)] w-full">
+                <Upload size={48} className="text-[var(--primary)] mb-4" />
+                <span className="text-lg font-medium">Click to upload image</span>
+                <span className="text-sm text-muted mt-2">or press Ctrl+V / Cmd+V to paste</span>
+                <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+              </label>
+            )}
           </div>
         </div>
       )}
