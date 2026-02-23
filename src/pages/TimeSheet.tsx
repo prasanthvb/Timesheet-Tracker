@@ -1,185 +1,204 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { Mail, Download, Printer, CheckCircle, Clock } from 'lucide-react';
+import { Mail, Download, Printer, CheckCircle, Upload, ExternalLink, Search } from 'lucide-react';
 import { mockOurTimesheet, mockClientTimesheet } from '../lib/mockData';
 import type { ExtractedData } from '../lib/mockData';
 
 export default function TimeSheet() {
   const { type } = useParams<{ type: string }>();
   
-  const [step, setStep] = useState<number>(0);
-  const [showPopup, setShowPopup] = useState<boolean>(false);
+  const [step, setStep] = useState<number>(0); // 0: Upload, 1: OCR Processing, 2: Dashboard
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [data, setData] = useState<ExtractedData | null>(null);
 
-  const title = type === 'our' ? 'Our Timesheet' : 'Client Timesheet';
+  const isVaisesika = type === 'Vaisesika';
+  const title = isVaisesika ? 'Vaisesika Timesheet' : 'Client Timesheet';
+  const portalLink = isVaisesika 
+    ? import.meta.env.VITE_VAISESIKA_TIMESHEET_URL 
+    : import.meta.env.VITE_CLIENT_TIMESHEET_URL;
+
+  const startOCR = useCallback(async (imgSrc: string) => {
+    setStep(1); // Set to processing
+    
+    // Simulate OCR reading and parsing JSON
+    await new Promise(r => setTimeout(r, 2500)); 
+    
+    const mockedDataRaw = isVaisesika ? mockOurTimesheet : mockClientTimesheet;
+    const mocked = { ...mockedDataRaw, screenshot: imgSrc }; 
+    
+    setData(mocked);
+    setStep(2); // Set to Dashboard
+  }, [isVaisesika]);
 
   useEffect(() => {
-    // Simulate SSO Navigation -> Landing -> Screenshot -> Data Extraction
-    const sequence = async () => {
-      setStep(1); // Navigating to SSO
-      await new Promise(r => setTimeout(r, 1500));
-      setStep(2); // Landing in timesheet
-      await new Promise(r => setTimeout(r, 1500));
-      setStep(3); // Taking screenshot & getting daily time
-      await new Promise(r => setTimeout(r, 2000));
+    const handlePaste = (e: ClipboardEvent) => {
+      if (step !== 0) return; // Only listen during upload step
+      const items = e.clipboardData?.items;
+      if (!items) return;
       
-      const mocked = type === 'our' ? mockOurTimesheet : mockClientTimesheet;
-      setData(mocked);
-      setShowPopup(true); // Show proceed popup 
+      for (const item of items) {
+        if (item.type.indexOf('image') === 0) {
+          const blob = item.getAsFile();
+          if (blob) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              if (event.target?.result) {
+                const src = event.target.result as string;
+                setUploadedImage(src);
+                startOCR(src);
+              }
+            };
+            reader.readAsDataURL(blob);
+          }
+        }
+      }
     };
     
-    sequence();
-  }, [type]);
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [step, startOCR]);
 
-  const handleProceed = () => {
-    setShowPopup(false);
-    setStep(4); // Display Data
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          const src = event.target.result as string;
+          setUploadedImage(src);
+          startOCR(src);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handlePrint = () => window.print();
   const handleExport = () => alert('Mock: Exporting to PDF/Excel...');
   const handleEmail = () => alert('Mock: Opening email client with report attached...');
 
-  // Extraction Process Screen
-  if (step < 4) {
-    return (
-      <div className="flex flex-col items-center justify-center mt-12 w-full max-w-2xl mx-auto">
-        <h2 className="mb-8">Processing {title}...</h2>
-        
-        <div className="w-full glass-panel p-8">
-          <div className="steps-container">
-             <div className={`step-item ${step > 0 ? 'completed' : step === 0 ? 'active' : ''}`}>1<span className="step-label">Launch SSO</span></div>
-             <div className={`step-item ${step > 1 ? 'completed' : step === 1 ? 'active' : ''}`}>2<span className="step-label">Access Portal</span></div>
-             <div className={`step-item ${step > 2 ? 'completed' : step === 2 ? 'active' : ''}`}>3<span className="step-label">Extract & Capture</span></div>
-             <div className={`step-item ${step > 3 ? 'completed' : step === 3 ? 'active' : ''}`}>4<span className="step-label">Review</span></div>
-          </div>
-
-          <div className="browser-mockup mt-8">
-            <div className="browser-header">
-              <div className="browser-dots">
-                <div className="dot dot-red"></div>
-                <div className="dot dot-yellow"></div>
-                <div className="dot dot-green"></div>
-              </div>
-              <div className="browser-address">
-                https://sso.{type}.timesheet.internal/login
-              </div>
-            </div>
-            <div className="browser-body flex items-center justify-center">
-              {step === 1 && <div className="text-center"><Clock className="animate-pulse-btn text-[var(--primary)] mb-4 mx-auto" size={32} /> Authenticating...</div>}
-              {step === 2 && <div className="text-center text-[var(--success)]"><CheckCircle className="mb-4 mx-auto" size={32} /> Access Granted. Loading Dashboard...</div>}
-              {step === 3 && (
-                <>
-                  <div className="absolute inset-0 bg-black/50 z-10 flex flex-col items-center justify-center text-white">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-2"></div>
-                    Running Visual Scraper & Data Extractor...
-                  </div>
-                  <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=1000" className="opacity-50 browser-screenshot-img object-cover h-[200px]" alt="Background Page" />
-                  <div className="scanner-line"></div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* The Action Popup */}
-        {showPopup && (
-           <div className="modal-overlay">
-             <div className="modal-content text-center">
-               <div className="w-16 h-16 bg-[rgba(16,185,129,0.1)] text-[var(--success)] rounded-full flex items-center justify-center mx-auto mb-4">
-                 <CheckCircle size={32} />
-               </div>
-               <h3>Extraction Complete</h3>
-               <p className="text-muted mt-2 mb-6">
-                 Successfully navigated to {title} portal, captured screenshot, and extracted daily timesheet data. 
-               </p>
-               <button className="btn btn-primary w-full" onClick={handleProceed}>
-                 Proceed to application for processing
-               </button>
-             </div>
-           </div>
-        )}
-      </div>
-    );
-  }
-
-  // Display Complete Data
-  if (!data) return null;
-
   return (
     <div className="w-full mt-4 pb-12 animate-fade-in">
-      <div className="flex flex-wrap items-center justify-between mb-8 gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
         <div>
-          <h1 className="!mb-2">{title} Results</h1>
-          <p className="text-muted">Extracted from {type === 'our' ? 'Internal SSO' : 'Client SSO'}</p>
+          <h1 className="!mb-2">{title}</h1>
+          <p className="text-muted">Automated OCR Timesheet Extraction</p>
         </div>
-        <div className="flex gap-4">
-          <button className="btn btn-secondary" onClick={handleEmail}>
-            <Mail size={16} /> Email Report
-          </button>
-          <button className="btn btn-secondary" onClick={handleExport}>
-            <Download size={16} /> Export CSV
-          </button>
-          <button className="btn btn-primary" onClick={handlePrint}>
-            <Printer size={16} /> Print
-          </button>
-        </div>
+        
+        {step === 2 && (
+          <div className="flex gap-4">
+            <button className="btn btn-secondary" onClick={handleEmail}>
+              <Mail size={16} /> Email Report
+            </button>
+            <button className="btn btn-secondary" onClick={handleExport}>
+              <Download size={16} /> Export CSV
+            </button>
+            <button className="btn btn-primary" onClick={handlePrint}>
+              <Printer size={16} /> Print
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full">
-        {/* Screenshot Panel */}
-        <div className="card glass-panel flex flex-col h-full">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="flex items-center gap-2"><Clock size={20} className="text-[var(--primary)]" /> Portal Evidence</h3>
-            <span className="badge badge-success">Verified Image</span>
+      {step === 0 && (
+        <div className="flex flex-col items-center justify-center mt-4 w-full max-w-2xl mx-auto text-center">
+          <div className="card glass-panel w-full p-8 mb-6">
+            <h3>Step 1: Complete your timesheet</h3>
+            <p className="text-muted mt-2 mb-6">Click the link below to access your portal, fill out your timesheet, and capture a screenshot of the completed view.</p>
+            <a href={portalLink} target="_blank" rel="noopener noreferrer" className="btn btn-primary inline-flex items-center gap-2">
+               Open {title} Portal <ExternalLink size={16} />
+            </a>
           </div>
-          <div className="flex-1 overflow-hidden rounded-lg border border-[var(--border)] relative bg-[var(--background)]">
-            <img 
-              src={data.screenshot} 
-              alt="Extracted Timesheet Portal Evidence" 
-              className="w-full h-full object-cover transition-transform hover:scale-105 duration-700"
-            />
+
+          <div className="card glass-panel w-full p-8">
+            <h3>Step 2: Provide Screenshot</h3>
+            <p className="text-muted mt-2 mb-6">Paste your screenshot from the clipboard or click below to upload.</p>
+            
+            <label className="border-2 border-dashed border-[var(--primary)] rounded-lg p-12 flex flex-col items-center justify-center bg-[rgba(79,70,229,0.05)] cursor-pointer transition-colors hover:bg-[rgba(79,70,229,0.1)] w-full">
+              <Upload size={48} className="text-[var(--primary)] mb-4" />
+              <span className="text-lg font-medium">Click to upload image</span>
+              <span className="text-sm text-muted mt-2">or press Ctrl+V / Cmd+V to paste</span>
+              <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+            </label>
           </div>
         </div>
+      )}
 
-        {/* Data Table Panel */}
-        <div className="card glass-panel flex flex-col h-full">
-           <h3 className="mb-4">Extracted Timesheet Data</h3>
-           <div className="table-wrapper mb-4 flex-1">
-             <table>
-               <thead>
-                 <tr>
-                   <th>Date</th>
-                   <th>Project</th>
-                   <th>Hours</th>
-                   <th>Status</th>
-                 </tr>
-               </thead>
-               <tbody>
-                 {data.entries.map((entry) => (
-                   <tr key={entry.id}>
-                     <td>{entry.date}</td>
-                     <td>{entry.project}</td>
-                     <td className="font-semibold text-white">{entry.hours} hrs</td>
-                     <td>
-                       <span className={`badge ${entry.status === 'Approved' ? 'badge-success' : 'badge-warning'}`}>
-                         {entry.status}
-                       </span>
-                     </td>
+      {step === 1 && (
+        <div className="flex flex-col items-center justify-center mt-12 w-full max-w-2xl mx-auto">
+          <div className="card glass-panel w-full p-8 text-center relative overflow-hidden">
+             <div className="absolute top-0 left-0 w-full h-1 bg-[var(--primary)] animate-[pulse_1s_ease-in-out_infinite]"></div>
+             
+             <Search size={48} className="text-[var(--primary)] mx-auto mb-6 animate-bounce" />
+             <h2 className="mb-2">Running OCR Analysis</h2>
+             <p className="text-muted">Extracting JSON text data from image and analyzing billable hours...</p>
+             
+             {uploadedImage && (
+               <div className="mt-8 relative max-w-md mx-auto border border-[var(--border)] rounded-md overflow-hidden bg-black/50">
+                 <img src={uploadedImage} alt="Reading..." className="w-full opacity-50 grayscale" />
+                 <div className="scanner-line"></div>
+               </div>
+             )}
+          </div>
+        </div>
+      )}
+
+      {step === 2 && data && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full animate-fade-in relative z-10">
+          {/* Screenshot Panel */}
+          <div className="card glass-panel flex flex-col h-full">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="flex items-center gap-2"><CheckCircle size={20} className="text-[var(--success)]" /> Processed Evidence</h3>
+              <span className="badge badge-success">OCR Complete</span>
+            </div>
+            <div className="flex-1 overflow-hidden rounded-lg border border-[var(--border)] relative bg-[var(--background)]">
+              <img 
+                src={data.screenshot} 
+                alt="Extracted Timesheet Portal Evidence" 
+                className="w-full h-full object-contain"
+              />
+            </div>
+          </div>
+
+          {/* Data Table Panel */}
+          <div className="card glass-panel flex flex-col h-full">
+             <h3 className="mb-4">Generated Dashboard Report</h3>
+             <div className="table-wrapper mb-4 flex-1">
+               <table>
+                 <thead>
+                   <tr>
+                     <th>Date</th>
+                     <th>Project</th>
+                     <th>Hours</th>
+                     <th>Detection Status</th>
                    </tr>
-                 ))}
-               </tbody>
-               <tfoot className="bg-[rgba(255,255,255,0.03)] border-t border-[var(--border)]">
-                 <tr>
-                   <td colSpan={2} className="text-right font-semibold">Total Weekly Hours:</td>
-                   <td className="font-semibold text-[var(--success)]">{data.totalHours} hrs</td>
-                   <td></td>
-                 </tr>
-               </tfoot>
-             </table>
-           </div>
+                 </thead>
+                 <tbody>
+                   {data.entries.map((entry) => (
+                     <tr key={entry.id}>
+                       <td>{entry.date}</td>
+                       <td>{entry.project}</td>
+                       <td className="font-semibold text-white">{entry.hours} hrs</td>
+                       <td>
+                         <span className={`badge ${entry.status === 'Approved' ? 'badge-success' : 'badge-warning'}`}>
+                           Extracted
+                         </span>
+                       </td>
+                     </tr>
+                   ))}
+                 </tbody>
+                 <tfoot className="bg-[rgba(255,255,255,0.03)] border-t border-[var(--border)]">
+                   <tr>
+                     <td colSpan={2} className="text-right font-semibold">Total Verified Hours:</td>
+                     <td className="font-semibold text-[var(--success)]">{data.totalHours} hrs</td>
+                     <td></td>
+                   </tr>
+                 </tfoot>
+               </table>
+             </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
